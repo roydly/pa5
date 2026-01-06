@@ -1,0 +1,9 @@
+实现了完整的常量管理系统，包括字符串、整数、布尔常量的生成和引用：
+void CgenClassTable::code_constants() {
+    stringtable.add_string("");      // 空字符串
+    inttable.add_string("0");       // 整数0
+    
+    stringtable.code_string_table(str, stringclasstag);
+    inttable.code_string_table(str, intclasstag);
+    code_bools(boolclasstag);
+}
