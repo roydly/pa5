@@ -1,0 +1,54 @@
+4.2.1 类名表和对象表 
+void CgenClassTable::code_class_nameTab() {
+    str << CLASSNAMETAB << LABEL;
+    std::vector<CgenNode*> class_nodes = GetClassNodes();
+    for (CgenNode* class_node : class_nodes) {
+        Symbol class_name = class_node->name;
+        StringEntry* str_entry = stringtable.lookup_string(class_name->get_string());
+        str << WORD;
+        str_entry->code_ref(str);
+        str << endl;
+    }
+}
+4.2.2 分发表生成 
+处理了方法重写的关键逻辑：
+std::vector<method_class*> CgenNode::GetFullMethods() {
+    if (m_full_methods.empty()) {
+        std::vector<CgenNode*> inheritance = GetInheritance();
+        
+        for (CgenNode* _class_node : inheritance) {
+            std::vector<method_class*> _methods = _class_node->GetMethods();
+            
+            for (method_class* _method : _methods) {
+                Symbol _method_name = _method->name;
+                
+                if (m_dispatch_idx_tab.find(_method_name) == m_dispatch_idx_tab.end()) {
+                    // 新方法
+                    m_full_methods.push_back(_method);
+                    m_dispatch_idx_tab[_method_name] = m_full_methods.size() - 1;
+                } else {
+                    // 方法重写：用子类方法替换
+                    int idx = m_dispatch_idx_tab[_method_name];
+                    m_full_methods[idx] = _method;
+                }
+            }
+        }
+    }
+    return m_full_methods;
+}
+4.2.3 类初始化方法 
+确保正确的初始化顺序：
+void CgenNode::code_init(ostream& s) {
+    // 先初始化父类
+    Symbol parent_name = get_parentnd()->name;
+    if (parent_name != No_class) {
+        emit_jal(parent_name->get_string() + CLASSINIT_SUFFIX, s);
+    }
+    
+    // 再初始化当前类属性
+    std::vector<attr_class*> attribs = GetAttribs();
+    for (attr_class* attrib : attribs) {
+        // 属性初始化逻辑
+        // ...
+    }
+}
