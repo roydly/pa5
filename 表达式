@@ -1,0 +1,137 @@
+4.1.1 常量表达式 
+整数常量：
+void int_const_class::code(ostream& s, Environment env) {
+    emit_load_int(ACC, inttable.lookup_string(token->get_string()), s);
+}
+字符串常量：
+void string_const_class::code(ostream& s, Environment env) {
+    emit_load_string(ACC, stringtable.lookup_string(token->get_string()), s);
+}
+布尔常量：
+void bool_const_class::code(ostream& s, Environment env) {
+    emit_load_bool(ACC, BoolConst(val), s);
+}
+4.1.2 对象引用 
+实现了对let变量、方法参数、类属性和self引用的统一处理：
+void object_class::code(ostream& s, Environment env) {
+    int idx;
+    
+    if ((idx = env.LookUpVar(name)) != -1) {
+        emit_load(ACC, idx + 1, SP, s);  // let变量
+    } else if ((idx = env.LookUpParam(name)) != -1) {
+        emit_load(ACC, idx + 3, FP, s);  // 参数
+    } else if ((idx = env.LookUpAttrib(name)) != -1) {
+        emit_load(ACC, idx + 3, SELF, s); // 属性
+    } else if (name == self) {
+        emit_move(ACC, SELF, s);        // self
+    }
+}
+4.1.3 算术运算 
+以加法为例，展示了复杂的对象操作和内存管理：
+void plus_class::code(ostream& s, Environment env) {
+    // 计算左操作数并保存
+    e1->code(s, env);
+    emit_push(ACC, s);
+    env.AddObstacle();
+    
+    // 计算右操作数并复制
+    e2->code(s, env);
+    emit_jal("Object.copy", s);
+    
+    // 恢复左操作数并执行加法
+    emit_addiu(SP, SP, 4, s);
+    emit_load(T1, 0, SP, s);
+    emit_move(T2, ACC, s);
+    
+    // 提取整数值并相加
+    emit_load(T1, 3, T1, s);
+    emit_load(T2, 3, T2, s);
+    emit_add(T3, T1, T2, s);
+    emit_store(T3, 3, ACC, s);
+}
+4.1.4 控制流表达式 
+条件表达式：
+void cond_class::code(ostream& s, Environment env) {
+    pred->code(s, env);
+    emit_fetch_int(T1, ACC, s);
+    
+    int label_false = labelnum++;
+    int label_finish = labelnum++;
+    
+    emit_beq(T1, ZERO, label_false, s);
+    then_exp->code(s, env);
+    emit_branch(label_finish, s);
+    
+    emit_label_def(label_false, s);
+    else_exp->code(s, env);
+    emit_label_def(label_finish, s);
+}
+循环表达式：
+void loop_class::code(ostream& s, Environment env) {
+    int start = labelnum++;
+    int finish = labelnum++;
+    
+    emit_label_def(start, s);
+    pred->code(s, env);
+    emit_fetch_int(T1, ACC, s);
+    emit_beq(T1, ZERO, finish, s);
+    
+    body->code(s, env);
+    emit_branch(start, s);
+    emit_label_def(finish, s);
+    
+    emit_move(ACC, ZERO, s);  // 循环返回void
+}
+4.1.5 复杂表达式 
+let表达式：
+void let_class::code(ostream& s, Environment env) {
+    init->code(s, env);
+    
+    // 处理默认初始化
+    if (init->IsEmpty()) {
+        if (type_decl == Str) {
+            emit_load_string(ACC, stringtable.lookup_string(""), s);
+        } else if (type_decl == Int) {
+            emit_load_int(ACC, inttable.lookup_string("0"), s);
+        } else if (type_decl == Bool) {
+            emit_load_bool(ACC, BoolConst(0), s);
+        }
+    }
+    
+    emit_push(ACC, s);
+    env.EnterScope();
+    env.AddVar(identifier);
+    body->code(s, env);
+    emit_addiu(SP, SP, 4, s);  // 退出作用域
+}
+方法调用：
+void dispatch_class::code(ostream& s, Environment env) {
+    // 参数计算和压栈
+    std::vector<Expression> actuals = GetActuals();
+    for (Expression expr : actuals) {
+        expr->code(s, env);
+        emit_push(ACC, s);
+        env.AddObstacle();
+    }
+    
+    // 对象计算和void检查
+    expr->code(s, env);
+    emit_bne(ACC, ZERO, labelnum, s);
+    emit_load_address(ACC, "str_const0", s);
+    emit_load_imm(T1, 1, s);
+    emit_jal("_dispatch_abort", s);
+    emit_label_def(labelnum, s);
+    ++labelnum;
+    
+    // 动态分发
+    Symbol class_name = env.m_class_node->name;
+    if (expr->get_type() != SELF_TYPE) {
+        class_name = expr->get_type();
+    }
+    
+    CgenNode* class_node = codegen_classtable->GetClassNode(class_name);
+    emit_load(T1, 2, ACC, s);  // 加载分发表
+    int idx = class_node->GetDispatchIdxTab()[name];
+    emit_load(T1, idx, T1, s);  // 加载方法地址
+    emit_jalr(T1, s);           // 调用方法
+}
